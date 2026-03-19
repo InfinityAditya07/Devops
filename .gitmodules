@@ -1,0 +1,3 @@
+[submodule "ec2_html"]
+	path = ec2_html
+	url = https://github.com/nandu-99/ec2_html.git

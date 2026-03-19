@@ -1,0 +1,43 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" | tr -d '\r' > ~/.ssh/github_actions
+          chmod 600 ~/.ssh/github_actions
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        run: |
+          ssh -i ~/.ssh/github_actions ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/shopsmart
+            git pull origin main
+
+            # Backend
+            cd server
+            npm install
+            pm2 restart shopsmart-backend
+
+            # Frontend
+            cd ../client
+            npm install
+            npm run build
+
+            sudo rm -rf /var/www/shopsmart/client/dist
+            sudo cp -r dist /var/www/shopsmart/client/
+
+            sudo systemctl restart nginx
+          EOF
