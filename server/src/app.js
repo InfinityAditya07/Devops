@@ -16,9 +16,14 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Root Route (optional, just to show something)
-app.get("/", (req, res) => {
-  res.send("ShopSmart Backend Service");
+const path = require("path");
+
+// Serve static frontend files
+app.use(express.static(path.join(__dirname, "../public")));
+
+// Catch-all route to serve the frontend's index.html for client-side routing
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "../public/index.html"));
 });
 
 module.exports = app;
