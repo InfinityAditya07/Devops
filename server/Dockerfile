@@ -1,9 +1,8 @@
 # Stage 1: Build Client (Frontend)
-FROM node:18-alpine AS client-builder
+FROM node:18-bullseye-slim AS client-builder
 WORKDIR /app/client
-COPY client/package*.json ./
-# Remove package-lock.json and use install to fix Alpine native binding errors
-RUN rm -f package-lock.json && npm install
+COPY client/package.json ./
+RUN npm install
 COPY client/ ./
 RUN npm run build
 
