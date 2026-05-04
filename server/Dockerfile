@@ -2,7 +2,8 @@
 FROM node:18-alpine AS client-builder
 WORKDIR /app/client
 COPY client/package*.json ./
-RUN npm ci
+# Remove package-lock.json and use install to fix Alpine native binding errors
+RUN rm -f package-lock.json && npm install
 COPY client/ ./
 RUN npm run build
 
