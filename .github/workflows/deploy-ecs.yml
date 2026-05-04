@@ -74,13 +74,46 @@ jobs:
 
       - name: Deploy to ECS Fargate service
         run: |
-          aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service ${{ env.ECS_SERVICE }} \
-            --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
-            --force-new-deployment
+          TASK_DEF_ARN="${{ steps.register-task-def.outputs.task_def_arn }}"
 
-          echo "Waiting for service to stabilize..."
+          # Check if the service already exists
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].status' \
+            --output text 2>/dev/null || echo "NONE")
+
+          if [ "$SERVICE_STATUS" == "ACTIVE" ]; then
+            echo "🔄 Service exists — updating..."
+            aws ecs update-service \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --service ${{ env.ECS_SERVICE }} \
+              --task-definition "$TASK_DEF_ARN" \
+              --force-new-deployment
+          else
+            echo "🚀 Service not found — creating..."
+            # Get default subnet and security group IDs
+            VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true \
+              --query 'Vpcs[0].VpcId' --output text)
+            SUBNETS=$(aws ec2 describe-subnets \
+              --filters Name=vpc-id,Values=$VPC_ID \
+              --query 'Subnets[*].SubnetId' \
+              --output text | tr '\t' ',')
+            SG_ID=$(aws ec2 describe-security-groups \
+              --filters Name=group-name,Values=shopsmart-ecs-sg \
+              --query 'SecurityGroups[0].GroupId' \
+              --output text)
+
+            aws ecs create-service \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --service-name ${{ env.ECS_SERVICE }} \
+              --task-definition "$TASK_DEF_ARN" \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+          fi
+
+          echo "⏳ Waiting for service to stabilize..."
           aws ecs wait services-stable \
             --cluster ${{ env.ECS_CLUSTER }} \
             --services ${{ env.ECS_SERVICE }}
