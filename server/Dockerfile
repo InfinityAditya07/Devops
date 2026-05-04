@@ -1,9 +1,11 @@
 # Stage 1: Build Client (Frontend)
-FROM node:18-bullseye-slim AS client-builder
+FROM node:20-bullseye-slim AS client-builder
 WORKDIR /app/client
-COPY client/package.json ./
-RUN npm install
+# Copy all source first, then install - ensures native binaries are built for Linux
 COPY client/ ./
+# Remove any lock files that may reference Mac-specific native binaries
+RUN rm -f package-lock.json node_modules/.package-lock.json
+RUN npm install
 RUN npm run build
 
 # Stage 2: Build Server (Backend)
