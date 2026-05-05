@@ -59,6 +59,33 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
+      # -------------------------------------------------------
+      # Idempotent S3 import — if the bucket already exists in
+      # AWS but is NOT in Terraform state (e.g. after state loss),
+      # import it so `terraform apply` won't error with
+      # "BucketAlreadyOwnedByYou".
+      # -------------------------------------------------------
+      - name: Import existing S3 bucket (idempotent)
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET_NAME="${{ vars.PROJECT_NAME || 'shopsmart' }}-assets-${ACCOUNT_ID}"
+
+          # Check if bucket exists in AWS
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "✅ Bucket '$BUCKET_NAME' exists in AWS."
+
+            # Check if it's already tracked in Terraform state
+            if terraform state show aws_s3_bucket.app_bucket >/dev/null 2>&1; then
+              echo "📋 Already in Terraform state — nothing to import."
+            else
+              echo "⬇️  Not in state — importing into Terraform..."
+              terraform import aws_s3_bucket.app_bucket "$BUCKET_NAME"
+              echo "✅ Import complete."
+            fi
+          else
+            echo "🆕 Bucket does not exist yet — Terraform will create it."
+          fi
+
       - name: Terraform Plan
         run: terraform plan -input=false -out=tfplan
 

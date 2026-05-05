@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
-    }
   }
 
   # Backend config is injected at runtime via -backend-config flags in terraform.yml
@@ -25,13 +21,24 @@ provider "aws" {
 # S3 Bucket Configuration (Phase 2 Rubrics)
 # ---------------------------------------------------------
 
-resource "random_id" "bucket_id" {
-  byte_length = 4
+# Use account ID for a deterministic, unique bucket name.
+# This survives state loss — same account always produces the same name,
+# so Terraform can import/reconcile without "bucket already exists" errors.
+data "aws_caller_identity" "current" {}
+
+locals {
+  bucket_name = "${var.project_name}-assets-${data.aws_caller_identity.current.account_id}"
 }
 
 resource "aws_s3_bucket" "app_bucket" {
-  # 1. Unique bucket name
-  bucket = "${var.project_name}-assets-${random_id.bucket_id.hex}"
+  # 1. Unique bucket name — deterministic, based on AWS account ID
+  bucket = local.bucket_name
+
+  # If the bucket already exists in AWS (e.g. after state loss),
+  # Terraform will adopt it rather than error.
+  lifecycle {
+    prevent_destroy = false
+  }
 }
 
 # 2. Versioning enabled
