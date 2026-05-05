@@ -18,10 +18,15 @@ app.get("/api/health", (req, res) => {
 
 const path = require("path");
 
-// Serve static frontend files
+// Serve static frontend files (Vite builds with base: "/shopsmart")
+// So assets are at /shopsmart/assets/... — serve them correctly
+app.use("/shopsmart", express.static(path.join(__dirname, "../public")));
+
+// Also serve root-level static files (favicon, etc.)
 app.use(express.static(path.join(__dirname, "../public")));
 
-// Catch-all route to serve the frontend's index.html for client-side routing
+// Catch-all route: only send index.html for non-file requests
+// This prevents returning HTML when .js/.css assets are missing
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
 });
