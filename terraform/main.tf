@@ -5,6 +5,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  # Remote backend: stores state in S3 so resources aren't recreated on every run
+  # ACTION REQUIRED: Create this bucket ONCE manually in AWS Console before first run
+  backend "s3" {
+    bucket = "shopsmart-terraform-state"   # ← change to your state bucket name
+    key    = "devops/terraform.tfstate"
+    region = "us-east-1"                  # ← change to your AWS region
+  }
 }
 
 provider "aws" {
@@ -78,14 +86,15 @@ data "aws_subnets" "default" {
   }
 }
 
-resource "aws_security_group" "ecs_sg" {
-  name        = "${var.project_name}-ecs-sg"
-  description = "Allow port 5001 inbound and all outbound"
+# Security Group for the ALB — allows HTTP from the internet
+resource "aws_security_group" "alb_sg" {
+  name        = "${var.project_name}-alb-sg"
+  description = "Allow HTTP inbound to ALB"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
-    from_port   = var.app_port
-    to_port     = var.app_port
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -95,6 +104,69 @@ resource "aws_security_group" "ecs_sg" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Security Group for ECS tasks — only accepts traffic from the ALB
+resource "aws_security_group" "ecs_sg" {
+  name        = "${var.project_name}-ecs-sg"
+  description = "Allow port 5001 inbound from ALB only"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    from_port       = var.app_port
+    to_port         = var.app_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]  # only ALB can reach containers
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# ---------------------------------------------------------
+# Application Load Balancer (ALB)
+# ---------------------------------------------------------
+
+resource "aws_lb" "app_alb" {
+  name               = "${var.project_name}-alb"
+  internal           = false          # internet-facing
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = data.aws_subnets.default.ids
+}
+
+# Target Group — where ALB forwards traffic to (ECS containers)
+resource "aws_lb_target_group" "app_tg" {
+  name        = "${var.project_name}-tg"
+  port        = var.app_port
+  protocol    = "HTTP"
+  vpc_id      = data.aws_vpc.default.id
+  target_type = "ip"   # required for Fargate awsvpc networking
+
+  health_check {
+    path                = "/api/health"   # your existing health check endpoint
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    matcher             = "200"
+  }
+}
+
+# Listener — ALB listens on port 80 and forwards to target group
+resource "aws_lb_listener" "app_listener" {
+  load_balancer_arn = aws_lb.app_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_tg.arn
   }
 }
 
@@ -161,6 +233,16 @@ resource "aws_ecs_service" "app_service" {
     security_groups  = [aws_security_group.ecs_sg.id]
     assign_public_ip = true
   }
+
+  # Wire the ALB target group to this ECS service
+  load_balancer {
+    target_group_arn = aws_lb_target_group.app_tg.arn
+    container_name   = "${var.project_name}-backend-container"
+    container_port   = var.app_port
+  }
+
+  # Wait for ALB listener to be ready before creating the service
+  depends_on = [aws_lb_listener.app_listener]
 
   lifecycle {
     ignore_changes = [task_definition]

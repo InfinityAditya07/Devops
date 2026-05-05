@@ -13,3 +13,8 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   value = aws_ecs_service.app_service.name
 }
+
+output "alb_url" {
+  description = "Public URL of the Application Load Balancer"
+  value       = "http://${aws_lb.app_alb.dns_name}"
+}
