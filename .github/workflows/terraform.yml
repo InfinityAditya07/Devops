@@ -25,8 +25,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 1: Authenticate with the initial voclabs credentials from Learner Lab
-      - name: Configure AWS Credentials (voclabs)
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -34,32 +33,12 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: us-east-1
 
-      # Step 2: Assume LabRole — which has full permissions in AWS Academy.
-      # voclabs is restricted by voc-cancel-cred policy; LabRole is not.
-      - name: Assume LabRole
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/LabRole"
-          echo "Assuming role: $ROLE_ARN"
-
-          CREDS=$(aws sts assume-role \
-            --role-arn "$ROLE_ARN" \
-            --role-session-name "github-actions-terraform" \
-            --duration-seconds 3600 \
-            --query 'Credentials' \
-            --output json)
-
-          echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .AccessKeyId)"         >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .SecretAccessKey)" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .SessionToken)"         >> $GITHUB_ENV
-          echo "✅ Now running as LabRole"
-
       - name: Validate required secrets
         run: |
           test -n "${{ secrets.AWS_ACCESS_KEY_ID }}"    || (echo "❌ Missing AWS_ACCESS_KEY_ID"    && exit 1)
           test -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" || (echo "❌ Missing AWS_SECRET_ACCESS_KEY" && exit 1)
           test -n "${{ secrets.AWS_SESSION_TOKEN }}"    || (echo "❌ Missing AWS_SESSION_TOKEN"    && exit 1)
-          test -n "${{ env.TF_STATE_BUCKET }}"          || (echo "❌ Missing TF_STATE_BUCKET — create an S3 bucket for Terraform state and add it as a secret" && exit 1)
+          test -n "${{ env.TF_STATE_BUCKET }}"          || (echo "❌ Missing TF_STATE_BUCKET" && exit 1)
           echo "✅ All required secrets present"
 
       - name: Setup Terraform
