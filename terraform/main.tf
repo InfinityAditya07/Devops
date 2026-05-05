@@ -1,18 +1,20 @@
 terraform {
+  required_version = ">= 1.5.0"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
-  # Remote backend: stores state in S3 so resources aren't recreated on every run
-  # ACTION REQUIRED: Create this bucket ONCE manually in AWS Console before first run
-  backend "s3" {
-    bucket = "shopsmart-terraform-state"   # ← change to your state bucket name
-    key    = "devops/terraform.tfstate"
-    region = "us-east-1"                  # ← change to your AWS region
-  }
+  # Backend config is injected at runtime via -backend-config flags in terraform.yml
+  # This avoids hardcoding secrets in code and lets the workflow control state location
+  backend "s3" {}
 }
 
 provider "aws" {
@@ -228,6 +230,19 @@ resource "aws_ecs_service" "app_service" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  # Give container time to boot before ALB health checks begin
+  health_check_grace_period_seconds = 60
+
+  force_new_deployment               = true
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 200
+
+  # Auto-rollback if deployment fails
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets          = data.aws_subnets.default.ids
     security_groups  = [aws_security_group.ecs_sg.id]
@@ -241,7 +256,7 @@ resource "aws_ecs_service" "app_service" {
     container_port   = var.app_port
   }
 
-  # Wait for ALB listener to be ready before creating the service
+  # Wait for ALB listener to exist before creating service
   depends_on = [aws_lb_listener.app_listener]
 
   lifecycle {

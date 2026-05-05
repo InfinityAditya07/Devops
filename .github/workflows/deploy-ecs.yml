@@ -91,8 +91,7 @@ jobs:
               --task-definition "$TASK_DEF_ARN" \
               --force-new-deployment
           else
-            echo "🚀 Service not found — creating..."
-            # Get default subnet and security group IDs
+            echo "🚀 Service not found — creating with ALB..."
             VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true \
               --query 'Vpcs[0].VpcId' --output text)
             SUBNETS=$(aws ec2 describe-subnets \
@@ -104,13 +103,33 @@ jobs:
               --query 'SecurityGroups[0].GroupId' \
               --output text)
 
-            aws ecs create-service \
-              --cluster ${{ env.ECS_CLUSTER }} \
-              --service-name ${{ env.ECS_SERVICE }} \
-              --task-definition "$TASK_DEF_ARN" \
-              --desired-count 1 \
-              --launch-type FARGATE \
-              --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+            # Look up the ALB target group ARN provisioned by Terraform
+            TG_ARN=$(aws elbv2 describe-target-groups \
+              --names shopsmart-tg \
+              --query 'TargetGroups[0].TargetGroupArn' \
+              --output text 2>/dev/null || echo "")
+
+            if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+              echo "✅ Found target group: $TG_ARN — attaching ALB"
+              aws ecs create-service \
+                --cluster ${{ env.ECS_CLUSTER }} \
+                --service-name ${{ env.ECS_SERVICE }} \
+                --task-definition "$TASK_DEF_ARN" \
+                --desired-count 1 \
+                --launch-type FARGATE \
+                --health-check-grace-period-seconds 60 \
+                --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
+                --load-balancers "targetGroupArn=$TG_ARN,containerName=${{ env.CONTAINER_NAME }},containerPort=5001"
+            else
+              echo "⚠️  Target group not found — creating service without ALB (run Terraform first)"
+              aws ecs create-service \
+                --cluster ${{ env.ECS_CLUSTER }} \
+                --service-name ${{ env.ECS_SERVICE }} \
+                --task-definition "$TASK_DEF_ARN" \
+                --desired-count 1 \
+                --launch-type FARGATE \
+                --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}"
+            fi
           fi
 
           echo "⏳ Waiting for service to stabilize..."
