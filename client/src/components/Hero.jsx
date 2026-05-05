@@ -17,7 +17,7 @@ const Hero = () => {
 
               <p className="text-gray-500 max-w-sm text-sm leading-relaxed">
                 Discover the latest trends & express your style effortlessly.
-                Shop exclusive collections with premium designs, just for you!
+                Shop exclusive collections with premium designs, just for you
               </p>
             </div>
 
